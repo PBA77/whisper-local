@@ -12,7 +12,8 @@ import os
 import sys
 import tempfile
 import time
-from typing import List, Dict, Any
+import subprocess
+from typing import List, Dict, Any, Optional
 import warnings
 
 import torch
@@ -46,7 +47,7 @@ warnings.filterwarnings(
 
 
 class TranscriptionDiarizer:
-    def __init__(self, whisper_model: str = None, hf_token: str = None, config_path: str = None):
+    def __init__(self, whisper_model: Optional[str] = None, hf_token: Optional[str] = None, config_path: Optional[str] = None):
         # Load configuration
         self.config = load_config(config_path)
         
@@ -70,6 +71,44 @@ class TranscriptionDiarizer:
             return "cuda"
         else:
             return "cpu"
+    
+    def preprocess_audio(self, audio_path: str) -> str:
+        """Preprocess audio with FFmpeg for better transcription quality."""
+        print("Preprocessing audio with FFmpeg...")
+        
+        # Create temporary file for processed audio
+        temp_dir = tempfile.mkdtemp()
+        processed_path = os.path.join(temp_dir, "processed_audio.wav")
+        
+        # FFmpeg command for audio normalization and enhancement
+        ffmpeg_command = [
+            "ffmpeg",
+            "-i", audio_path,
+            "-ac", "1",  # Convert to mono
+            "-ar", "16000",  # Resample to 16kHz (optimal for Whisper)
+            "-f", "wav",
+            "-filter_complex",
+            "volume=3dB, dynaudnorm=p=0.9:m=20:s=20",  # Volume boost and dynamic normalization
+            "-hide_banner",
+            "-loglevel", "quiet",
+            "-y",  # Overwrite output files
+            processed_path
+        ]
+        
+        print(f"FFmpeg command: {' '.join(ffmpeg_command)}")
+        
+        try:
+            result = subprocess.run(ffmpeg_command, check=True, capture_output=True, text=True)
+            print("Audio preprocessing completed successfully")
+            return processed_path
+        except subprocess.CalledProcessError as e:
+            print(f"FFmpeg preprocessing failed: {e}")
+            print(f"stderr: {e.stderr}")
+            # Return original path if preprocessing fails
+            return audio_path
+        except FileNotFoundError:
+            print("FFmpeg not found - using original audio file")
+            return audio_path
     
     def load_models(self):
         """Load Whisper and pyannote models."""
@@ -101,12 +140,14 @@ class TranscriptionDiarizer:
             raise
     
     
-    def diarize_audio(self, audio_path: str, num_speakers: int = None) -> Any:
+    def diarize_audio(self, audio_path: str, num_speakers: Optional[int] = None) -> Any:
         """Perform speaker diarization using pyannote."""
         print("Performing speaker diarization...")
         
         # Check diarization pipeline device
-        if hasattr(self.diarization_pipeline, '_segmentation') and hasattr(self.diarization_pipeline._segmentation, 'model'):
+        if (self.diarization_pipeline is not None and 
+            hasattr(self.diarization_pipeline, '_segmentation') and 
+            hasattr(self.diarization_pipeline._segmentation, 'model')):
             seg_device = next(self.diarization_pipeline._segmentation.model.parameters()).device
             print(f"Diarization segmentation model device: {seg_device}")
         
@@ -118,6 +159,9 @@ class TranscriptionDiarizer:
         start_time = time.time()
         
         # Set up diarization parameters
+        if self.diarization_pipeline is None:
+            raise RuntimeError("Diarization pipeline not loaded")
+            
         if num_speakers:
             diarization = self.diarization_pipeline(audio_path, num_speakers=num_speakers)
         else:
@@ -162,7 +206,7 @@ class TranscriptionDiarizer:
         
         # Ensure first segment starts at 0
         if not df.empty and df.iloc[0]['start'] > 0:
-            df.iloc[0, df.columns.get_loc('start')] = 0.0
+            df.at[df.index[0], 'start'] = 0.0
         
         # Merge adjacent segments from the same speaker
         merged_segments = []
@@ -189,7 +233,7 @@ class TranscriptionDiarizer:
         
         # Ensure last segment ends at audio duration
         if not merged_df.empty and merged_df.iloc[-1]['end'] < audio_duration:
-            merged_df.iloc[-1, merged_df.columns.get_loc('end')] = audio_duration
+            merged_df.at[merged_df.index[-1], 'end'] = audio_duration
         
         print(f"Merged {len(df)} segments into {len(merged_df)} speaker blocks")
         
@@ -233,7 +277,8 @@ class TranscriptionDiarizer:
                 speaker = segment['speaker']
                 segment_duration = end_time - start_time
                 
-                print(f"Transcribing segment {idx+1}/{len(speaker_segments)}: {speaker} ({start_time:.1f}s-{end_time:.1f}s, {segment_duration:.1f}s)")
+                segment_num = idx + 1 if isinstance(idx, int) else 1
+                print(f"Transcribing segment {segment_num}/{len(speaker_segments)}: {speaker} ({start_time:.1f}s-{end_time:.1f}s, {segment_duration:.1f}s)")
                 
                 # Extract audio segment
                 temp_audio_file = self.extract_audio_segment(audio_path, start_time, end_time, temp_dir)
@@ -241,7 +286,10 @@ class TranscriptionDiarizer:
                 # Transcribe segment with timing
                 try:
                     transcription_start = time.time()
-                    segment_transcription = self.whisper_model.transcribe(temp_audio_file)
+                    if self.whisper_model is not None:
+                        segment_transcription = self.whisper_model.transcribe(temp_audio_file)
+                    else:
+                        raise RuntimeError("Whisper model not loaded")
                     transcription_time = time.time() - transcription_start
                     
                     total_transcription_time += transcription_time
@@ -249,7 +297,7 @@ class TranscriptionDiarizer:
                     
                     segment_ratio = segment_duration / transcription_time
                     
-                    text = segment_transcription["text"].strip()
+                    text = str(segment_transcription["text"]).strip()
                     
                     if text:  # Only add if transcription produced text
                         results.append({
@@ -279,7 +327,7 @@ class TranscriptionDiarizer:
         print(f"Successfully transcribed {len(results)} segments")
         return results
     
-    def process_audio(self, audio_path: str, num_speakers: int = None) -> List[Dict[str, Any]]:
+    def process_audio(self, audio_path: str, num_speakers: Optional[int] = None) -> List[Dict[str, Any]]:
         """Main processing pipeline - new approach: diarization first, then per-segment transcription."""
         if not os.path.exists(audio_path):
             raise FileNotFoundError(f"Audio file not found: {audio_path}")
@@ -290,12 +338,15 @@ class TranscriptionDiarizer:
         
         print("=== NEW APPROACH: Diarization First, Then Per-Segment Transcription ===")
         
+        # Preprocess audio with FFmpeg
+        processed_audio_path = self.preprocess_audio(audio_path)
+        
         # Get audio duration for segment boundary fixing
-        waveform, sample_rate = torchaudio.load(audio_path)
+        waveform, sample_rate = torchaudio.load(processed_audio_path)
         audio_duration = waveform.shape[1] / sample_rate
         
-        # Step 1: Perform diarization to identify speaker segments
-        diarization = self.diarize_audio(audio_path, num_speakers)
+        # Step 1: Perform diarization to identify speaker segments (use processed audio)
+        diarization = self.diarize_audio(processed_audio_path, num_speakers)
         
         # Step 2: Merge adjacent segments from the same speaker
         speaker_segments = self.merge_speaker_segments(diarization, audio_duration)
@@ -304,8 +355,8 @@ class TranscriptionDiarizer:
             print("Warning: No speaker segments found")
             return []
         
-        # Step 3: Transcribe each merged speaker segment separately
-        results = self.transcribe_segments(audio_path, speaker_segments)
+        # Step 3: Transcribe each merged speaker segment separately (use processed audio)
+        results = self.transcribe_segments(processed_audio_path, speaker_segments)
         
         print(f"=== Processing Complete: {len(results)} final segments ===")
         return results
