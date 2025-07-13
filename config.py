@@ -5,14 +5,27 @@ Configuration management for the transcription and diarization tool.
 import os
 import sys
 
-# Prefer the standard library tomllib on Python 3.11+
+# Handle TOML library imports and exceptions
 if sys.version_info >= (3, 11):
     try:
-        import tomllib as toml
+        import tomllib
+        # tomllib only has TOMLDecodeError, not TomlDecodeError
+        TomlDecodeError = tomllib.TOMLDecodeError
+        def load_toml(file_path):
+            with open(file_path, 'rb') as f:
+                return tomllib.load(f)
     except ModuleNotFoundError:
-        import toml  # fall back to external package
+        import toml
+        TomlDecodeError = toml.TomlDecodeError
+        def load_toml(file_path):
+            with open(file_path, 'r') as f:
+                return toml.load(f)
 else:
     import toml
+    TomlDecodeError = toml.TomlDecodeError
+    def load_toml(file_path):
+        with open(file_path, 'r') as f:
+            return toml.load(f)
 from pathlib import Path
 from typing import Optional, Dict, Any
 
@@ -49,9 +62,8 @@ class Config:
             return {}
         
         try:
-            with open(self.config_path, 'r', encoding='utf-8') as f:
-                return toml.load(f)
-        except (toml.TomlDecodeError, IOError) as e:
+            return load_toml(self.config_path)
+        except (TomlDecodeError, IOError) as e:
             print(f"Warning: Could not load config file {self.config_path}: {e}")
             return {}
     
