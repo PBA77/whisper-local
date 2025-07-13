@@ -22,6 +22,28 @@ import pandas as pd
 from pyannote.audio import Pipeline
 from config import load_config, create_config_if_missing
 
+# Suppress noisy third-party warnings to keep CLI output readable
+warnings.filterwarnings(
+    "ignore",
+    message="torchaudio._backend.*deprecated",
+    category=UserWarning,
+)
+warnings.filterwarnings(
+    "ignore",
+    message="Module 'speechbrain.pretrained' was deprecated",
+    category=UserWarning,
+)
+warnings.filterwarnings(
+    "ignore",
+    message="`torchaudio.backend.common.AudioMetaData` has been moved",
+    category=UserWarning,
+)
+warnings.filterwarnings(
+    "ignore",
+    message="The MPEG_LAYER_III subtype is unknown to TorchAudio",
+    category=UserWarning,
+)
+
 
 class TranscriptionDiarizer:
     def __init__(self, whisper_model: str = None, hf_token: str = None, config_path: str = None):
@@ -57,11 +79,11 @@ class TranscriptionDiarizer:
         # Try to move Whisper to MPS if available
         if self.device == "mps":
             try:
-                self.whisper_model = self.whisper_model.to('mps')
+                self.whisper_model = self.whisper_model.to("mps")
                 print("Whisper model moved to MPS (Apple GPU)")
-            except Exception as e:
-                print(f"Warning: Could not move Whisper to MPS: {e}")
-                print("Falling back to CPU for Whisper")
+            except Exception:
+                print("Could not move Whisper to MPS. Falling back to CPU.")
+                self.device = "cpu"
         
         print("Loading diarization pipeline...")
         if not self.hf_token:
