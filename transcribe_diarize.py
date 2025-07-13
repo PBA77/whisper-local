@@ -140,7 +140,7 @@ class TranscriptionDiarizer:
         
         return diarization
     
-    def merge_speaker_segments(self, diarization: Any) -> pd.DataFrame:
+    def merge_speaker_segments(self, diarization: Any, audio_duration: float) -> pd.DataFrame:
         """Convert diarization to DataFrame and merge adjacent segments from same speaker."""
         print("Processing diarization segments...")
         
@@ -159,6 +159,10 @@ class TranscriptionDiarizer:
         
         # Sort by start time
         df = df.sort_values('start').reset_index(drop=True)
+        
+        # Ensure first segment starts at 0
+        if not df.empty and df.iloc[0]['start'] > 0:
+            df.iloc[0, df.columns.get_loc('start')] = 0.0
         
         # Merge adjacent segments from the same speaker
         merged_segments = []
@@ -182,6 +186,11 @@ class TranscriptionDiarizer:
         merged_segments.append(current_segment.to_dict())
         
         merged_df = pd.DataFrame(merged_segments)
+        
+        # Ensure last segment ends at audio duration
+        if not merged_df.empty and merged_df.iloc[-1]['end'] < audio_duration:
+            merged_df.iloc[-1, merged_df.columns.get_loc('end')] = audio_duration
+        
         print(f"Merged {len(df)} segments into {len(merged_df)} speaker blocks")
         
         return merged_df
@@ -281,11 +290,15 @@ class TranscriptionDiarizer:
         
         print("=== NEW APPROACH: Diarization First, Then Per-Segment Transcription ===")
         
+        # Get audio duration for segment boundary fixing
+        waveform, sample_rate = torchaudio.load(audio_path)
+        audio_duration = waveform.shape[1] / sample_rate
+        
         # Step 1: Perform diarization to identify speaker segments
         diarization = self.diarize_audio(audio_path, num_speakers)
         
         # Step 2: Merge adjacent segments from the same speaker
-        speaker_segments = self.merge_speaker_segments(diarization)
+        speaker_segments = self.merge_speaker_segments(diarization, audio_duration)
         
         if speaker_segments.empty:
             print("Warning: No speaker segments found")
