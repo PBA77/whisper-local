@@ -61,6 +61,9 @@ uv.lock
 config.toml
 .env
 
+# Models directory
+models/
+
 # Documentation artifacts
 TEST_RESULTS.md
 NEW_APPROACH_RESULTS.md
