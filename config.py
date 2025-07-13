@@ -3,7 +3,16 @@ Configuration management for the transcription and diarization tool.
 """
 
 import os
-import toml
+import sys
+
+# Prefer the standard library tomllib on Python 3.11+
+if sys.version_info >= (3, 11):
+    try:
+        import tomllib as toml
+    except ModuleNotFoundError:
+        import toml  # fall back to external package
+else:
+    import toml
 from pathlib import Path
 from typing import Optional, Dict, Any
 

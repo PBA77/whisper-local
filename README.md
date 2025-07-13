@@ -15,7 +15,7 @@ A command-line tool that combines OpenAI Whisper Large for transcription with py
 
 ### Prerequisites
 
-1. **Python 3.9+** (recommended for best M1 compatibility)
+1. **Python 3.9+** (recommended for best M1 compatibility; Python 3.11+ uses the built-in `tomllib` module while earlier versions rely on the `toml` package)
 2. **uv** package manager (recommended):
    ```bash
    curl -LsSf https://astral.sh/uv/install.sh | sh
