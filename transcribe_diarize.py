@@ -141,13 +141,19 @@ class TranscriptionDiarizer:
         )
 
         # Try to move Whisper to MPS if available
+        whisper_device = "cpu"  # Default fallback
         if self.device == "mps":
             try:
                 self.whisper_model = self.whisper_model.to("mps")
-                print("Whisper model moved to MPS (Apple GPU)")
-            except Exception:
-                print("Could not move Whisper to MPS. Falling back to CPU.")
-                self.device = "cpu"
+                whisper_device = "mps"
+                print("Whisper model successfully moved to MPS (Apple GPU)")
+            except Exception as e:
+                print(f"Warning: Could not fully move Whisper to MPS: {str(e)[:80]}...")
+                print("Note: Some Whisper operations may still use MPS, others will use CPU")
+                # Keep device as mps - some operations might still work
+                whisper_device = "mixed (MPS/CPU)"
+        
+        self.whisper_device = whisper_device
 
         print("Loading diarization pipeline...")
         if not self.hf_token:
@@ -177,6 +183,7 @@ class TranscriptionDiarizer:
     def diarize_audio(self, audio_path: str, num_speakers: Optional[int] = None) -> Any:
         """Perform speaker diarization using pyannote."""
         print("Performing speaker diarization...")
+        print(f"Diarization pipeline target device: {self.device}")
 
         # Check diarization pipeline device
         if (
@@ -316,6 +323,7 @@ class TranscriptionDiarizer:
     ) -> List[Dict[str, Any]]:
         """Transcribe each speaker segment separately."""
         print(f"Transcribing {len(speaker_segments)} speaker segments...")
+        print(f"Whisper using device: {getattr(self, 'whisper_device', 'unknown')}")
 
         results = []
         total_transcription_time = 0
