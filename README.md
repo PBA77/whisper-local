@@ -260,3 +260,16 @@ The tool performs these steps:
 6. Outputs in requested format
 
 The combination algorithm uses overlap detection to assign transcribed text to speaker segments, ensuring accurate speaker attribution even when segment boundaries don't perfectly align.
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+### Dependencies
+
+This project uses several open-source libraries, all compatible with MIT licensing:
+- **PyTorch** (BSD License)
+- **OpenAI Whisper** (MIT License) 
+- **pyannote.audio** (MIT License)
+- **NumPy, Pandas** (BSD License)
+- **HuggingFace Hub** (Apache 2.0)
